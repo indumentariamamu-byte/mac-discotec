@@ -34,12 +34,29 @@ export async function onRequest({ request, env }) {
   const action = url.searchParams.get('action');
   if (request.method === 'GET' && !action) {
     return new Response(page, { headers: { ...headers, 'content-type': 'text/html; charset=utf-8',
-      'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'" } });
+      'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; img-src 'self'" } });
   }
   try {
     const period = seasonInfo(new Date(), env.MAC_SEASON_START_MONTH);
     const db = env.MAC_SEALS_DB;
     if (!db) return json({ error: 'La base de datos aún no está conectada.' }, 503);
+    if (action === 'like' && ['GET', 'POST'].includes(request.method)) {
+      const visitor = url.searchParams.get('visitor');
+      if (!validCode(visitor)) return json({ error: 'Identificador inválido.' }, 400);
+      if (request.method === 'POST') {
+        if (request.headers.get('origin') !== url.origin) return json({ error: 'Origen inválido.' }, 403);
+        const liked = url.searchParams.get('liked');
+        if (!['0', '1'].includes(liked)) return json({ error: 'Reacción inválida.' }, 400);
+        const change = liked === '1'
+          ? 'INSERT OR IGNORE INTO mac_promo_likes (season, visitor) VALUES (?, ?)'
+          : 'DELETE FROM mac_promo_likes WHERE season = ? AND visitor = ?';
+        await db.prepare(change).bind(period.season, visitor).run();
+      }
+      const result = await db.prepare(
+        'SELECT COUNT(*) AS likes, COALESCE(MAX(visitor = ?), 0) AS liked FROM mac_promo_likes WHERE season = ?'
+      ).bind(visitor, period.season).first();
+      return json({ ...result, liked: Boolean(result.liked) });
+    }
     if (request.method === 'GET' && action === 'balance') {
       const code = url.searchParams.get('code');
       if (!validCode(code)) return json({ error: 'Código inválido.' }, 400);
@@ -88,7 +105,7 @@ export async function onRequest({ request, env }) {
 
 const page = `<!doctype html>
 <html lang="es-UY"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sellos de Descuentos | MAC Discoteque</title>
+<title>Sellos de Descuentos | MAC Discoteque</title><meta name="description" content="Sumá sellos con MAC Discoteque y disfrutá un 5% fijo en cada servicio extra."><meta property="og:title" content="Sellos de Descuentos | MAC Discoteque"><meta property="og:description" content="Sumá sellos y disfrutá un 5% fijo en cada servicio extra.">
 <style>
 *{box-sizing:border-box}body{margin:0;background:#110e19;color:#fff;font:17px system-ui}
 main{max-width:670px;margin:auto;padding:30px 20px 60px}a{color:#dfb8ff}
@@ -99,8 +116,14 @@ input,select,button{width:100%;padding:12px;border-radius:8px;font:inherit;margi
 input,select{background:#120e1d;color:#fff;border:1px solid #80669a}
 button{border:0;background:#dfb8ff;color:#211832;font-weight:700;cursor:pointer}
 output{display:block;margin-top:12px;overflow-wrap:anywhere}summary{cursor:pointer}
+.promo{background:radial-gradient(ellipse at 100% 0%,#812584 0,transparent 65%),radial-gradient(ellipse at 0% 100%,#853725 0,transparent 60%),#241132;border-color:#a54e7a}
+.promo h1{margin:12px 0}.promo strong{color:#ffdc95}.actions{display:flex;gap:10px;flex-wrap:wrap}
+.actions button{width:auto;padding:10px 15px;background:#31143e;color:white;border:1px solid #e48abb}
+.actions button[aria-pressed=true]{background:#ab2268;border-color:#ffadd4}
 </style>
-<main><a href="/">Volver a MAC Discoteque</a><h1>Sellos de Descuentos</h1><p>5% de descuento en cada servicio extra durante la promoción anual.</p>
+<main><a href="/">Volver a MAC Discoteque</a><section class="promo"><h1>Sellos de Descuentos</h1><p><strong>5% de descuento</strong> en cada servicio extra durante la promoción anual.</p>
+<div class="actions"><button type="button" id="like" aria-pressed="false">♡ Me gusta</button><button type="button" id="share">Compartir enlace</button></div>
+<output id="socialResult" aria-live="polite"></output></section>
 <section><h2>Tu tarjeta</h2><form id="balance"><label>Código de tarjeta<input name="code" required maxlength="32" autocomplete="off"></label><button>Consultar sellos</button></form><output id="balanceResult" aria-live="polite"></output></section>
 <section><h2>Cómo sumás</h2><ul><li>Cada fiesta propia contratada suma 1 sello.</li><li>Cada referido que contrata suma 1 sello.</li><li>Tres o más extras en una misma fiesta suman 1 sello adicional.</li></ul></section>
 <section><h2>Calculá el descuento</h2><form id="discount"><label>Precio de un servicio extra (UYU)<input name="price" type="number" min="0" max="1000000" step="0.01" required></label><button>Calcular precio final</button></form><output id="discountResult" aria-live="polite"></output></section>
@@ -113,6 +136,49 @@ output{display:block;margin-top:12px;overflow-wrap:anywhere}summary{cursor:point
 <button>Registrar sellos</button></form><output id="recordResult" aria-live="polite"></output></details>
 </main><script>
 const el = id => document.getElementById(id);
+const like = el('like');
+const social = el('socialResult');
+let visitor = '';
+try {
+  visitor = localStorage.getItem('mac-promo-visitor') || crypto.randomUUID().replaceAll('-', '');
+  localStorage.setItem('mac-promo-visitor', visitor);
+} catch {
+  visitor = crypto.randomUUID().replaceAll('-', '');
+}
+async function loadLikes(liked) {
+  const params = new URLSearchParams({ action: 'like', visitor });
+  if (typeof liked === 'boolean') params.set('liked', liked ? '1' : '0');
+  const response = await fetch(location.pathname + '?' + params, {
+    method: typeof liked === 'boolean' ? 'POST' : 'GET', cache: 'no-store',
+  });
+  if (!response.ok) throw Error('Los Me gusta no están disponibles en este momento.');
+  const result = await response.json();
+  like.setAttribute('aria-pressed', String(result.liked));
+  like.textContent = (result.liked ? '♥' : '♡') + ' Me gusta · ' + result.likes;
+}
+like.onclick = async () => {
+  like.disabled = true;
+  try {
+    await loadLikes(like.getAttribute('aria-pressed') !== 'true');
+    social.textContent = '';
+  } catch (error) { social.textContent = error.message; }
+  finally { like.disabled = false; }
+};
+like.disabled = true;
+loadLikes().catch(error => { social.textContent = error.message; })
+  .finally(() => { like.disabled = false; });
+el('share').onclick = async () => {
+  const link = location.origin + '/sellos-mac';
+  try {
+    if (navigator.share) await navigator.share({ title: 'Sellos de Descuentos | MAC Discoteque', url: link });
+    else {
+      await navigator.clipboard.writeText(link);
+      social.textContent = 'Enlace copiado. Podés pegarlo en Instagram o WhatsApp.';
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') social.textContent = link;
+  }
+};
 const balance = el('balance');
 const discount = el('discount');
 discount.onsubmit = event => {

@@ -88,7 +88,7 @@ export async function onRequest({ request, env }) {
 
 const page = `<!doctype html>
 <html lang="es-UY"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sellos MAC Discoteque</title>
+<title>Sellos de Descuentos | MAC Discoteque</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#110e19;color:#fff;font:17px system-ui}
 main{max-width:670px;margin:auto;padding:30px 20px 60px}a{color:#dfb8ff}
@@ -100,7 +100,7 @@ input,select{background:#120e1d;color:#fff;border:1px solid #80669a}
 button{border:0;background:#dfb8ff;color:#211832;font-weight:700;cursor:pointer}
 output{display:block;margin-top:12px;overflow-wrap:anywhere}summary{cursor:pointer}
 </style>
-<main><a href="/">Volver a MAC Discoteque</a><h1>Sellos MAC</h1><p>5% de descuento en cada servicio extra durante la promoción anual.</p>
+<main><a href="/">Volver a MAC Discoteque</a><h1>Sellos de Descuentos</h1><p>5% de descuento en cada servicio extra durante la promoción anual.</p>
 <section><h2>Tu tarjeta</h2><form id="balance"><label>Código de tarjeta<input name="code" required maxlength="32" autocomplete="off"></label><button>Consultar sellos</button></form><output id="balanceResult" aria-live="polite"></output></section>
 <section><h2>Cómo sumás</h2><ul><li>Cada fiesta propia contratada suma 1 sello.</li><li>Cada referido que contrata suma 1 sello.</li><li>Tres o más extras en una misma fiesta suman 1 sello adicional.</li></ul></section>
 <section><h2>Calculá el descuento</h2><form id="discount"><label>Precio de un servicio extra (UYU)<input name="price" type="number" min="0" max="1000000" step="0.01" required></label><button>Calcular precio final</button></form><output id="discountResult" aria-live="polite"></output></section>
